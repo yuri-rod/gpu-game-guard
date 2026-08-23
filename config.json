@@ -1,0 +1,9 @@
+{
+  "idle_interval_seconds": 3,
+  "ingame_interval_seconds": 2,
+  "gpu_pattern": "",
+  "extra_protected_processes": [
+    "discord",
+    "spotify"
+  ]
+}
