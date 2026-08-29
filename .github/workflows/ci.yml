@@ -8,7 +8,7 @@ on:
 
 jobs:
   lint-and-validate:
-    name: PSScriptAnalyzer & Script Validation
+    name: PSScriptAnalyzer & Pester Tests
     runs-on: windows-latest
     steps:
       - name: Checkout Code
@@ -35,3 +35,9 @@ jobs:
               exit 1
           }
           Write-Host "PowerShell script syntax validated successfully."
+
+      - name: Run Pester Unit Tests
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
+          Invoke-Pester -Path .\tests\GpuGameGuard.Tests.ps1 -Output Detailed
