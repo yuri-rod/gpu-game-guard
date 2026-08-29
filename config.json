@@ -2,8 +2,16 @@
   "idle_interval_seconds": 3,
   "ingame_interval_seconds": 2,
   "gpu_pattern": "",
+  "auto_restore": false,
   "extra_protected_processes": [
     "discord",
     "spotify"
-  ]
+  ],
+  "extra_kill_targets": [
+    "ollama",
+    "comfyui",
+    "lmstudio",
+    "sd-webui"
+  ],
+  "custom_games": []
 }

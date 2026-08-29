@@ -12,6 +12,7 @@
 **Dynamic GPU and VRAM guardian for PC gaming workstations.**  
 *Automatically frees dedicated GPU memory from background AI models, browsers, and worker processes when a game launches.*
 
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](GpuGameGuard.ps1)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg)]()
 [![PowerShell: 5.1+](https://img.shields.io/badge/powershell-5.1%2B-blue.svg)]()
@@ -24,16 +25,17 @@
 
 If you use your Windows PC for both local AI development (Ollama, ComfyUI, PyTorch, Whisper) and PC gaming, you have likely encountered sudden frame drops, micro-stutters, or Direct3D Out-of-Memory (OOM) crashes because a background process was silently holding 4GB to 8GB of VRAM.
 
-**GPU Game Guard** runs silently in the background as a lightweight, zero-overhead Windows daemon. It detects when a Steam or PC game launches, instantly sweeps unneeded GPU allocations, and releases enforcement when you stop playing.
+**GPU Game Guard** runs silently in the background as a lightweight, zero-overhead Windows daemon. It detects when a Steam, Epic Games, Xbox Game Pass, or custom PC game launches, instantly sweeps unneeded GPU allocations, and restores or releases enforcement when you stop playing.
 
 ---
 
 ## Key Capabilities
 
 * **Hardware-Level DXGI & VRAM Inspection:** Queries exact per-process dedicated GPU memory using Windows DXGI adapters and performance counters.
-* **Smart Steam & Game Detection:** Tracks active game sessions with zero polling lag.
+* **Smart Multi-Platform Game Detection:** Tracks active game sessions across Steam, Epic Games, Xbox Game Pass, EA, Ubisoft, and custom titles.
 * **Whitelisted Infrastructure:** Never interrupts GPU drivers, anti-cheats (Vanguard, EasyAntiCheat, BattlEye), fan curves (FanControl, MSI Afterburner), or active Jellyfin hardware transcodes.
 * **Graceful Browser Handling:** Sends `CloseMainWindow` to browsers first so your open tabs and sessions are preserved.
+* **Automatic Service Restoration:** Option to restart stopped AI servers when your game exits (`"auto_restore": true`).
 * **Zero Overhead:** Consumes less than 15MB of RAM while idling.
 
 ---
@@ -56,11 +58,17 @@ powershell.exe -ExecutionPolicy Bypass -File C:\GpuGameGuard\GpuGameGuard.ps1 -I
 # Check active gaming GPU, active game status, and live VRAM allocations
 powershell.exe -File GpuGameGuard.ps1 -Status
 
+# List all detected DXGI GPUs and dedicated VRAM capacities
+powershell.exe -File GpuGameGuard.ps1 -ListGpus
+
 # Run a simulation pass without closing any processes
 powershell.exe -File GpuGameGuard.ps1 -DryRun
 
 # Execute an immediate one-off GPU memory sweep
 powershell.exe -File GpuGameGuard.ps1 -PurgeNow
+
+# Print current version
+powershell.exe -File GpuGameGuard.ps1 -Version
 
 # Uninstall and stop the background scheduled task
 powershell.exe -File GpuGameGuard.ps1 -Uninstall

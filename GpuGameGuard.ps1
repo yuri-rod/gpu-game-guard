@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-    GpuGameGuard - Dynamic GPU and VRAM guardian for PC gaming workstations.
+    GpuGameGuard v1.1.0 - Dynamic GPU and VRAM guardian for PC gaming workstations.
 
 .DESCRIPTION
     Automatically frees dedicated GPU memory (VRAM) from background AI models,
-    browsers, and unneeded worker processes when a game launches.
+    browsers, and unneeded worker processes when a game launches across Steam, Epic Games,
+    Xbox Game Pass, EA, Ubisoft, GOG, and custom titles.
     Restores background tasks and releases enforcement when the game closes.
 
 .PARAMETER Install
@@ -22,6 +23,15 @@
 .PARAMETER Status
     Displays active game status, GPU device info, and current VRAM usage.
 
+.PARAMETER ListGpus
+    Lists all detected DXGI graphics adapters and dedicated VRAM capacities.
+
+.PARAMETER Version
+    Displays current GpuGameGuard version.
+
+.PARAMETER Config
+    Optional custom path to config.json.
+
 .PARAMETER Pause
     Temporarily pauses enforcement.
 
@@ -38,21 +48,28 @@ param(
     [switch]$DryRun,
     [switch]$PurgeNow,
     [switch]$Status,
+    [switch]$ListGpus,
+    [switch]$Version,
     [switch]$Pause,
     [switch]$Resume,
+    [string]$Config = '',
     [string]$GpuPattern = ''
 )
 
+$script:Version = '1.1.0'
 $ErrorActionPreference = 'Continue'
 $script:BaseDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogPath = Join-Path $script:BaseDir 'guard.log'
 $script:TaskName = 'GpuGameGuard'
-$script:ConfigPath = Join-Path $script:BaseDir 'config.json'
+$script:ConfigPath = if ($Config) { $Config } else { Join-Path $script:BaseDir 'config.json' }
 
 # Default configurations
 $script:IdleInterval = 3
 $script:InGameInterval = 2
 $script:DefaultGpuPattern = 'NVIDIA|Radeon|Arc'
+$script:AutoRestore = $false
+$script:TerminatedToRestore = [System.Collections.Generic.List[string]]::new()
+$script:CustomGames = @()
 
 # Protected processes that are never terminated
 $script:DefaultProtected = @(
@@ -66,7 +83,7 @@ $script:DefaultProtected = @(
     'vmmem','vmmemwsl','vmwp','vmcompute','wslservice','wslhost','wsl',
     # GPU Drivers & Services
     'nvdisplay.container','nvcontainer','nvsphelper64','nvsphelper','nvidia share','nvidia web helper','nvngx_update',
-    'amdrsserv','amdow','amddvr','amd_ags_x64',
+    'amdrsserv','amdow','amddvr','amd_ags_x64','igfxem','igfxhk','igfxtray',
     # Shells, terminals, developer tools
     'windowsterminal','openconsole','wt','powershell','pwsh','powershell_ise','cmd','code','node','ssh','sshd',
     # Hardware & Fan control
@@ -75,14 +92,19 @@ $script:DefaultProtected = @(
     # Gaming Launchers & Anti-Cheat
     'steam','steamwebhelper','steamservice','steamerrorreporter','gameoverlayui',
     'gamebar','gamebarftserver','gamingservices','gamingservicesnet','crashpad_handler',
-    'epicgameslauncher','galaxyclient','ubisoftconnect','eadesktop','eacefsubprocess',
+    'epicgameslauncher','galaxyclient','ubisoftconnect','eadesktop','eacefsubprocess','battlenet','battle.net',
     'easyanticheat','easyanticheat_eos','beservice','battleye','vgc','vgtray','faceit','vanguard',
     # Media servers (shared GPU transcode)
     'jellyfin','caddy'
 )
 
 # Explicit kill targets during gaming (even if zero allocated VRAM currently reported)
-$script:AlwaysKillDuringGame = @('ollama','ollama app','ollama_llama_server','ollama-runner')
+$script:AlwaysKillDuringGame = @(
+    'ollama','ollama app','ollama_llama_server','ollama-runner',
+    'lmstudio','lms','comfyui','sd-webui','webui-user','automatic1111',
+    'koboldcpp','jan','jan-app','localai','text-generation-webui',
+    'vllm','llama-server'
+)
 
 # Browsers (closed gracefully first to preserve open tabs)
 $script:Browsers = @('chrome','msedge','firefox','brave','opera','opera_gx','vivaldi','librewolf')
@@ -96,6 +118,46 @@ function Write-Log {
     } catch {}
     if ($Host.UI.RawUI) {
         Write-Verbose $line
+    }
+}
+
+function Import-ConfigFile {
+    if (Test-Path -Path $script:ConfigPath) {
+        try {
+            $raw = Get-Content -Path $script:ConfigPath -Raw -Encoding UTF8 -ErrorAction Stop
+            $cfg = $raw | ConvertFrom-Json -ErrorAction Stop
+            if ($cfg.idle_interval_seconds) { $script:IdleInterval = [int]$cfg.idle_interval_seconds }
+            if ($cfg.ingame_interval_seconds) { $script:InGameInterval = [int]$cfg.ingame_interval_seconds }
+            if ($cfg.gpu_pattern) { $script:DefaultGpuPattern = [string]$cfg.gpu_pattern }
+            if ($cfg.auto_restore) { $script:AutoRestore = [bool]$cfg.auto_restore }
+            if ($cfg.extra_protected_processes) {
+                foreach ($p in @($cfg.extra_protected_processes)) {
+                    $pName = ([string]$p).ToLowerInvariant().Trim()
+                    if ($pName -and -not ($script:DefaultProtected -contains $pName)) {
+                        $script:DefaultProtected += $pName
+                    }
+                }
+            }
+            if ($cfg.extra_kill_targets) {
+                foreach ($k in @($cfg.extra_kill_targets)) {
+                    $kName = ([string]$k).ToLowerInvariant().Trim()
+                    if ($kName -and -not ($script:AlwaysKillDuringGame -contains $kName)) {
+                        $script:AlwaysKillDuringGame += $kName
+                    }
+                }
+            }
+            if ($cfg.custom_games) {
+                foreach ($g in @($cfg.custom_games)) {
+                    $gName = ([string]$g).ToLowerInvariant().Trim()
+                    if ($gName -and -not ($script:CustomGames -contains $gName)) {
+                        $script:CustomGames += $gName
+                    }
+                }
+            }
+            Write-Log "Loaded configuration from $($script:ConfigPath)"
+        } catch {
+            Write-Log "WARN: Failed to parse configuration: $($_.Exception.Message)"
+        }
     }
 }
 
@@ -232,8 +294,9 @@ function Resolve-GamingAdapter {
         [string]$Pattern = ''
     )
     if (-not $Adapters -or $Adapters.Count -eq 0) { return $null }
-    if ($Pattern) {
-        $matched = @($Adapters | Where-Object { $_.Description -match $Pattern })
+    $pat = if ($Pattern) { $Pattern } else { $script:DefaultGpuPattern }
+    if ($pat) {
+        $matched = @($Adapters | Where-Object { $_.Description -match $pat })
         if ($matched.Count -eq 1) { return $matched[0] }
         if ($matched.Count -gt 1) {
             return ($matched | Sort-Object DedicatedVideoMemory -Descending)[0]
@@ -245,12 +308,41 @@ function Resolve-GamingAdapter {
     return $Adapters[0]
 }
 
-function Get-RunningSteamAppId {
-    if (-not (Get-Process -Name steam -ErrorAction SilentlyContinue)) { return 0 }
-    try {
-        $val = Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam' -Name RunningAppID -ErrorAction Stop
-        return [int64]$val.RunningAppID
-    } catch { return 0 }
+function Get-ActiveGameSession {
+    # 1. Steam check
+    if (Get-Process -Name steam -ErrorAction SilentlyContinue) {
+        try {
+            $val = Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam' -Name RunningAppID -ErrorAction Stop
+            $appId = [int64]$val.RunningAppID
+            if ($appId -gt 0) {
+                return [pscustomobject]@{
+                    IsRunning = $true
+                    Source = 'Steam'
+                    Identifier = "AppID $appId"
+                }
+            }
+        } catch {}
+    }
+
+    # 2. Custom or known game process detection
+    if ($script:CustomGames.Count -gt 0) {
+        foreach ($cg in $script:CustomGames) {
+            $p = Get-Process -Name $cg -ErrorAction SilentlyContinue
+            if ($p) {
+                return [pscustomobject]@{
+                    IsRunning = $true
+                    Source = 'Custom'
+                    Identifier = $p[0].ProcessName
+                }
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        IsRunning = $false
+        Source = 'None'
+        Identifier = 'Idle'
+    }
 }
 
 function Get-GpuUsageByProcess {
@@ -308,6 +400,12 @@ function Invoke-GpuEnforcement {
         $actions += $action
 
         if (-not $Simulate) {
+            $exePath = $null
+            try { $exePath = $proc.MainModule.FileName } catch {}
+            if ($exePath -and -not $script:TerminatedToRestore.Contains($exePath)) {
+                $script:TerminatedToRestore.Add($exePath)
+            }
+
             if ($action.Action -eq 'CloseGracefully') {
                 $null = $proc.CloseMainWindow()
                 Start-Sleep -Milliseconds 200
@@ -331,12 +429,33 @@ function Invoke-GpuEnforcement {
             }
             $actions += $action
             if (-not $Simulate) {
+                $exePath = $null
+                try { $exePath = $p.MainModule.FileName } catch {}
+                if ($exePath -and -not $script:TerminatedToRestore.Contains($exePath)) {
+                    $script:TerminatedToRestore.Add($exePath)
+                }
                 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
                 Write-Log "Enforced: Terminated $($p.ProcessName) (PID $($p.Id))"
             }
         }
     }
     return $actions
+}
+
+function Restore-TerminatedServices {
+    if (-not $script:AutoRestore -or $script:TerminatedToRestore.Count -eq 0) { return }
+    Write-Log "Restoring terminated services ($($script:TerminatedToRestore.Count) targets)..."
+    foreach ($exe in @($script:TerminatedToRestore)) {
+        try {
+            if (Test-Path -Path $exe) {
+                Start-Process -FilePath $exe -WindowStyle Minimized -ErrorAction SilentlyContinue
+                Write-Log "Restored: $exe"
+            }
+        } catch {
+            Write-Log "WARN: Failed to restore $exe : $($_.Exception.Message)"
+        }
+    }
+    $script:TerminatedToRestore.Clear()
 }
 
 function Install-GpuGameGuard {
@@ -367,22 +486,23 @@ function Uninstall-GpuGameGuard {
 }
 
 function Show-Status {
+    Import-ConfigFile
     $adapters = Get-DxgiAdapters
     $gaming = Resolve-GamingAdapter -Adapters $adapters -Pattern $GpuPattern
-    $appId = Get-RunningSteamAppId
+    $session = Get-ActiveGameSession
 
-    Write-Host "=== GpuGameGuard Status ===" -ForegroundColor Cyan
+    Write-Host "=== GpuGameGuard v$($script:Version) Status ===" -ForegroundColor Cyan
     if ($gaming) {
         Write-Host "Gaming GPU:  $($gaming.Description) (LUID: $($gaming.Luid))"
         Write-Host "VRAM:        $([math]::Round($gaming.DedicatedVideoMemory / 1GB, 2)) GB"
     } else {
         Write-Host "Gaming GPU:  None detected" -ForegroundColor Yellow
     }
-    Write-Host "Steam Game:  $(if ($appId -gt 0) { "Running (AppID: $appId)" } else { "None (Idle)" })"
+    Write-Host "Game State:  $(if ($session.IsRunning) { "Running ($($session.Source): $($session.Identifier))" } else { "Idle (No game active)" })"
     
     if ($gaming) {
         $usage = Get-GpuUsageByProcess -AdapterLuid $gaming.Luid
-        Write-Host "`nActive GPU Processes ($($usage.Count)):"
+        Write-Host "`nActive GPU Allocations ($($usage.Count)):"
         foreach ($u in $usage) {
             $p = Get-Process -Id $u.PID -ErrorAction SilentlyContinue
             $pname = if ($p) { $p.ProcessName } else { "Unknown" }
@@ -391,26 +511,46 @@ function Show-Status {
     }
 }
 
+function Show-GpuList {
+    $adapters = Get-DxgiAdapters
+    Write-Host "=== Detected DXGI Graphics Adapters ===" -ForegroundColor Cyan
+    if (-not $adapters -or $adapters.Count -eq 0) {
+        Write-Host "No DXGI graphics adapters detected."
+        return
+    }
+    foreach ($a in $adapters) {
+        $vramGB = [math]::Round($a.DedicatedVideoMemory / 1GB, 2)
+        Write-Host "Adapter: $($a.Description)"
+        Write-Host "  Vendor ID:  0x$($a.VendorId.ToString('X4'))"
+        Write-Host "  Device ID:  0x$($a.DeviceId.ToString('X4'))"
+        Write-Host "  LUID:       $($a.Luid)"
+        Write-Host "  VRAM:       $vramGB GB"
+        Write-Host ""
+    }
+}
+
 function Start-WatcherLoop {
-    Write-Log "GpuGameGuard daemon started (PID $PID, Admin=$(Test-Admin))"
-    $state = @{ InGame = $false; AppId = 0 }
+    Import-ConfigFile
+    Write-Log "GpuGameGuard daemon v$($script:Version) started (PID $PID, Admin=$(Test-Admin))"
+    $state = @{ InGame = $false; Source = 'None' }
     $adapter = $null
 
     while ($true) {
         $delay = $script:IdleInterval
         try {
-            $appId = Get-RunningSteamAppId
-            $isGameRunning = $appId -gt 0
+            $session = Get-ActiveGameSession
+            $isGameRunning = $session.IsRunning
 
             if ($isGameRunning -and -not $state.InGame) {
-                Write-Log "Steam game started (AppID $appId). Reserving dedicated GPU memory."
+                Write-Log "Game started ($($session.Source): $($session.Identifier)). Reserving dedicated GPU memory."
                 $state.InGame = $true
-                $state.AppId = $appId
+                $state.Source = $session.Source
             } elseif (-not $isGameRunning -and $state.InGame) {
-                Write-Log "Steam game closed. Releasing GPU enforcement."
+                Write-Log "Game closed. Releasing GPU enforcement."
                 $state.InGame = $false
-                $state.AppId = 0
+                $state.Source = 'None'
                 $adapter = $null
+                Restore-TerminatedServices
             }
 
             if ($state.InGame) {
@@ -432,10 +572,13 @@ function Start-WatcherLoop {
 }
 
 # Entrypoint
+if ($Version) { Write-Output "GpuGameGuard v$($script:Version)"; exit 0 }
 if ($Install) { Install-GpuGameGuard; exit 0 }
 if ($Uninstall) { Uninstall-GpuGameGuard; exit 0 }
+if ($ListGpus) { Show-GpuList; exit 0 }
 if ($Status) { Show-Status; exit 0 }
 if ($DryRun) {
+    Import-ConfigFile
     $adapters = Get-DxgiAdapters
     $adapter = Resolve-GamingAdapter -Adapters $adapters -Pattern $GpuPattern
     if ($adapter) {
@@ -445,6 +588,7 @@ if ($DryRun) {
     exit 0
 }
 if ($PurgeNow) {
+    Import-ConfigFile
     $adapters = Get-DxgiAdapters
     $adapter = Resolve-GamingAdapter -Adapters $adapters -Pattern $GpuPattern
     if ($adapter) {
