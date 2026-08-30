@@ -85,9 +85,45 @@ powershell.exe -File GpuGameGuard.ps1 -Uninstall
 | **Hardware & Fans** | **Protected** | `FanControl.exe`, `MSIAfterburner.exe`, `RTSS.exe`, `HWiNFO64.exe` |
 | **Launchers & DRM** | **Protected** | `steam.exe`, `steamwebhelper.exe`, `EpicGamesLauncher.exe`, `EADesktop.exe` |
 | **Anti-Cheats** | **Protected** | `EasyAntiCheat.exe`, `BEService.exe`, `vgc.exe` (Vanguard), `faceit.exe` |
-| **Media Server** | **Protected** | `jellyfin.exe`, `caddy.exe` (Remote hardware transcodes continue smoothly) |
+| **Media Server** | **Protected** | `jellyfin.exe`, `caddy.exe` — but see the ffmpeg warning below |
 | **Background AI** | **Terminated** | `ollama.exe`, `ollama_llama_server.exe`, `comfyui` worker processes |
 | **Web Browsers** | **Graceful Close** | `chrome.exe`, `msedge.exe`, `firefox.exe`, `brave.exe`, `opera.exe`, `vivaldi.exe` |
+
+---
+
+## Known limitation: ffmpeg and media transcodes
+
+**Read this if you run a media server.** Enforcement here works by exception: it
+walks every process using the GPU and terminates anything that is not on the
+protected list. Protection is matched on the **process name**.
+
+That has a consequence which is not obvious. Protecting `jellyfin` does **not**
+protect a Jellyfin transcode, because the process holding the VRAM is not
+`jellyfin.exe` — it is an `ffmpeg.exe` that Jellyfin spawned. Unless you protect
+it, a transcode in progress is terminated when a game starts.
+
+Adding `ffmpeg` to `extra_protected_processes` fixes that, and creates the
+opposite problem: your own batch encodes are named `ffmpeg.exe` too, and those
+are usually exactly the work you *want* to step aside for a game. Both binaries
+report the same process name; only their paths differ:
+
+```
+C:\Program Files\Jellyfin\Server\ffmpeg.exe          the family is watching
+C:\Users\you\AppData\...\WinGet\Links\ffmpeg.exe     a restartable batch job
+```
+
+A name-based list cannot tell those apart. That is a limit of the design, not an
+oversight: this tool is deliberately a simple list, and a list has this hole.
+
+**What to do:**
+
+- If you run a media server and value the stream above everything, add `ffmpeg`
+  to `extra_protected_processes`. You lose the ability to reclaim VRAM from your
+  own encodes; that is the trade.
+- If you need both — protect the stream, reclaim from the batch — a name list
+  cannot express it. [vramp](https://github.com/yuri-rod/vramp) exists for that
+  case: it matches on path, parent, command line and service session as well as
+  name, and it never touches a process it was not told about.
 
 ---
 
