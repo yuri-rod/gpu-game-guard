@@ -39,5 +39,10 @@ jobs:
       - name: Run Pester Unit Tests
         shell: pwsh
         run: |
-          Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser
-          Invoke-Pester -Path .\tests\GpuGameGuard.Tests.ps1 -Output Detailed
+          # Unpinned, this pulls whatever Pester is newest, and the v3/v4 test
+          # syntax this repo used broke silently the day the runner moved to
+          # Pester 6. Stay inside one major.
+          Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser `
+            -MinimumVersion 6.0.0 -MaximumVersion 6.999.999
+          # -CI makes a failing run set the exit code instead of just printing.
+          Invoke-Pester -Path .\tests\GpuGameGuard.Tests.ps1 -Output Detailed -CI

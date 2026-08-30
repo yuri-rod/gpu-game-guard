@@ -571,7 +571,11 @@ function Start-WatcherLoop {
     }
 }
 
-# Entrypoint
+# Entrypoint. Dot-sourcing this file only defines the functions above:
+# InvocationName is '.' in that case, and the tests rely on it to reach
+# Resolve-GamingAdapter without the script running or calling exit.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 if ($Version) { Write-Output "GpuGameGuard v$($script:Version)"; exit 0 }
 if ($Install) { Install-GpuGameGuard; exit 0 }
 if ($Uninstall) { Uninstall-GpuGameGuard; exit 0 }

@@ -1,5 +1,28 @@
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$scriptPath = Join-Path (Split-Path -Parent $here) 'GpuGameGuard.ps1'
+BeforeAll {
+    # $MyInvocation.MyCommand.Path is empty under Pester 5+, which silently left
+    # $scriptPath blank and made every test here fail on a path error rather
+    # than on anything it was meant to check. $PSScriptRoot is the replacement.
+    $script:scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'GpuGameGuard.ps1'
+
+    # Dot-sourcing returns early inside the script, so this only imports the
+    # functions.
+    . $script:scriptPath
+
+    $script:rtx = [pscustomobject]@{
+        Description = 'NVIDIA GeForce RTX 3060'
+        VendorId = 0x10DE
+        DeviceId = 0x2504
+        DedicatedVideoMemory = 12884901888
+        Luid = '0x00000000_0x00014800'
+    }
+    $script:amd = [pscustomobject]@{
+        Description = 'AMD Radeon(TM) Graphics'
+        VendorId = 0x1002
+        DeviceId = 0x13C0
+        DedicatedVideoMemory = 536870912
+        Luid = '0x00000000_0x00015c17'
+    }
+}
 
 function New-TestProcess {
     param(
@@ -20,35 +43,27 @@ function New-TestProcess {
 
 Describe 'GpuGameGuard Version & Config' {
     It 'reports valid semver version' {
-        $v = & powershell.exe -NoProfile -File $scriptPath -Version
-        $v | Should Match 'GpuGameGuard v1\.\d+\.\d+'
+        $v = & powershell.exe -NoProfile -File $script:scriptPath -Version
+        $v | Should -Match 'GpuGameGuard v1\.\d+\.\d+'
+    }
+
+    It 'defines its functions when dot-sourced instead of running' {
+        Get-Command Resolve-GamingAdapter -CommandType Function | Should -Not -BeNullOrEmpty
     }
 }
 
 Describe 'Resolve-GamingAdapter' {
-    $rtx = [pscustomobject]@{
-        Description = 'NVIDIA GeForce RTX 3060'
-        VendorId = 0x10DE
-        DeviceId = 0x2504
-        DedicatedVideoMemory = 12884901888
-        Luid = '0x00000000_0x00014800'
-    }
-    $amd = [pscustomobject]@{
-        Description = 'AMD Radeon(TM) Graphics'
-        VendorId = 0x1002
-        DeviceId = 0x13C0
-        DedicatedVideoMemory = 536870912
-        Luid = '0x00000000_0x00015c17'
-    }
-
     It 'selects discrete GPU with highest VRAM when pattern matches' {
-        . $scriptPath -Version > $null
-        $actual = Resolve-GamingAdapter -Adapters @($amd, $rtx) -Pattern 'NVIDIA'
-        $actual.Luid | Should Be '0x00000000_0x00014800'
+        $actual = Resolve-GamingAdapter -Adapters @($script:amd, $script:rtx) -Pattern 'NVIDIA'
+        $actual.Luid | Should -Be '0x00000000_0x00014800'
     }
 
     It 'falls back to highest dedicated VRAM when no pattern provided' {
-        $actual = Resolve-GamingAdapter -Adapters @($amd, $rtx)
-        $actual.Luid | Should Be '0x00000000_0x00014800'
+        $actual = Resolve-GamingAdapter -Adapters @($script:amd, $script:rtx)
+        $actual.Luid | Should -Be '0x00000000_0x00014800'
+    }
+
+    It 'returns nothing when handed no adapters' {
+        Resolve-GamingAdapter -Adapters @() | Should -BeNullOrEmpty
     }
 }
