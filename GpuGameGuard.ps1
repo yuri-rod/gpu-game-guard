@@ -56,7 +56,7 @@ param(
     [string]$GpuPattern = ''
 )
 
-$script:Version = '1.1.0'
+$script:AppVersion = '1.1.0'
 $ErrorActionPreference = 'Continue'
 $script:BaseDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogPath = Join-Path $script:BaseDir 'guard.log'
@@ -491,7 +491,7 @@ function Show-Status {
     $gaming = Resolve-GamingAdapter -Adapters $adapters -Pattern $GpuPattern
     $session = Get-ActiveGameSession
 
-    Write-Host "=== GpuGameGuard v$($script:Version) Status ===" -ForegroundColor Cyan
+    Write-Host "=== GpuGameGuard v$($script:AppVersion) Status ===" -ForegroundColor Cyan
     if ($gaming) {
         Write-Host "Gaming GPU:  $($gaming.Description) (LUID: $($gaming.Luid))"
         Write-Host "VRAM:        $([math]::Round($gaming.DedicatedVideoMemory / 1GB, 2)) GB"
@@ -531,7 +531,7 @@ function Show-GpuList {
 
 function Start-WatcherLoop {
     Import-ConfigFile
-    Write-Log "GpuGameGuard daemon v$($script:Version) started (PID $PID, Admin=$(Test-Admin))"
+    Write-Log "GpuGameGuard daemon v$($script:AppVersion) started (PID $PID, Admin=$(Test-Admin))"
     $state = @{ InGame = $false; Source = 'None' }
     $adapter = $null
 
@@ -576,7 +576,7 @@ function Start-WatcherLoop {
 # Resolve-GamingAdapter without the script running or calling exit.
 if ($MyInvocation.InvocationName -eq '.') { return }
 
-if ($Version) { Write-Output "GpuGameGuard v$($script:Version)"; exit 0 }
+if ($Version) { Write-Output "GpuGameGuard v$($script:AppVersion)"; exit 0 }
 if ($Install) { Install-GpuGameGuard; exit 0 }
 if ($Uninstall) { Uninstall-GpuGameGuard; exit 0 }
 if ($ListGpus) { Show-GpuList; exit 0 }
