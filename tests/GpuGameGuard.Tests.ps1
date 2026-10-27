@@ -1,11 +1,7 @@
 BeforeAll {
-    # $MyInvocation.MyCommand.Path is empty under Pester 5+, which silently left
-    # $scriptPath blank and made every test here fail on a path error rather
-    # than on anything it was meant to check. $PSScriptRoot is the replacement.
     $script:scriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'GpuGameGuard.ps1'
 
-    # Dot-sourcing returns early inside the script, so this only imports the
-    # functions.
+    # Dot-sourcing imports definitions without starting the watcher.
     . $script:scriptPath
 
     $script:rtx = [pscustomobject]@{
@@ -43,12 +39,74 @@ function New-TestProcess {
 
 Describe 'GpuGameGuard Version & Config' {
     It 'reports valid semver version' {
-        $v = & powershell.exe -NoProfile -File $script:scriptPath -Version
+        $v = & (Get-Process -Id $PID).Path -NoProfile -File $script:scriptPath -Version
         $v | Should -Match 'GpuGameGuard v1\.\d+\.\d+'
     }
 
     It 'defines its functions when dot-sourced instead of running' {
         Get-Command Resolve-GamingAdapter -CommandType Function | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Invoke-GpuEnforcement protection' {
+    BeforeEach {
+        $script:DefaultProtected = @('protected-worker')
+        $script:CustomGames = @('mygame')
+        $script:AlwaysKillDuringGame = @('protected-worker', 'mygame')
+        $script:TerminatedToRestore.Clear()
+
+        Mock Get-GpuUsageByProcess {
+            @(
+                [pscustomobject]@{ PID = 101; MB = 128 }
+                [pscustomobject]@{ PID = 102; MB = 256 }
+            )
+        }
+        Mock Get-Process {
+            param($Id, $Name)
+            if ($Id -eq 101 -or $Name -eq 'protected-worker') {
+                [pscustomobject]@{ Id = 101; ProcessName = 'protected-worker' }
+            }
+            if ($Id -eq 102 -or $Name -eq 'mygame') {
+                [pscustomobject]@{ Id = 102; ProcessName = 'mygame' }
+            }
+        }
+        Mock Stop-Process {}
+        Mock Write-Log {}
+    }
+
+    It 'excludes protected processes and custom games from the preview' {
+        $actions = @(Invoke-GpuEnforcement -Adapter $script:rtx -Simulate)
+        $actions.Count | Should -Be 0
+        Should -Invoke Stop-Process -Times 0 -Exactly
+        $script:TerminatedToRestore.Count | Should -Be 0
+    }
+
+    It 'keeps protection when the same names are explicit kill targets' {
+        $actions = @(Invoke-GpuEnforcement -Adapter $script:rtx)
+        Should -Invoke Stop-Process -Times 0 -Exactly
+        $actions.Count | Should -Be 0
+    }
+
+    It 'still selects an unprotected GPU process without stopping it in a preview' {
+        $script:DefaultProtected = @()
+        $script:AlwaysKillDuringGame = @()
+        $actions = @(Invoke-GpuEnforcement -Adapter $script:rtx -Simulate)
+        $actions.Count | Should -Be 1
+        $actions[0].Name | Should -Be 'protected-worker'
+        $actions[0].Action | Should -Be 'Terminate'
+        Should -Invoke Stop-Process -Times 0 -Exactly
+        $script:TerminatedToRestore.Count | Should -Be 0
+    }
+
+    It 'still stops an unprotected explicit target without GPU allocations' {
+        $script:DefaultProtected = @()
+        Mock Get-GpuUsageByProcess { @() }
+        $actions = @(Invoke-GpuEnforcement -Adapter $script:rtx)
+        $actions.Count | Should -Be 1
+        $actions[0].Name | Should -Be 'protected-worker'
+        $actions[0].Action | Should -Be 'TerminateAlways'
+        Should -Invoke Stop-Process -Times 1 -Exactly -ParameterFilter { $Id -eq 101 }
+        Should -Invoke Stop-Process -Times 0 -Exactly -ParameterFilter { $Id -eq 102 }
     }
 }
 

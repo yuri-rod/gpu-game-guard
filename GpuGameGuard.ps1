@@ -1,12 +1,11 @@
 <#
 .SYNOPSIS
-    GpuGameGuard v1.1.0 - Dynamic GPU and VRAM guardian for PC gaming workstations.
+    GpuGameGuard v1.1.0 - Stops unprotected GPU processes during gaming on Windows.
 
 .DESCRIPTION
-    Automatically frees dedicated GPU memory (VRAM) from background AI models,
-    browsers, and unneeded worker processes when a game launches across Steam, Epic Games,
-    Xbox Game Pass, EA, Ubisoft, GOG, and custom titles.
-    Restores background tasks and releases enforcement when the game closes.
+    Detects Steam sessions and configured game process names, then stops
+    unprotected GPU processes and explicit kill targets. Optional restoration
+    relaunches captured executable paths when the detected game session ends.
 
 .PARAMETER Install
     Registers and starts the Windows Scheduled Task (requires elevation).
@@ -33,10 +32,10 @@
     Optional custom path to config.json.
 
 .PARAMETER Pause
-    Temporarily pauses enforcement.
+    Reserved parameter without a handler. Does not pause an existing watcher.
 
 .PARAMETER Resume
-    Resumes active enforcement.
+    Reserved parameter without a handler. Does not resume an existing watcher.
 
 .PARAMETER GpuPattern
     Custom regex pattern to match the discrete gaming GPU adapter description.
@@ -106,7 +105,7 @@ $script:AlwaysKillDuringGame = @(
     'vllm','llama-server'
 )
 
-# Browsers (closed gracefully first to preserve open tabs)
+# Browsers receive a close request before forced termination after 200 ms.
 $script:Browsers = @('chrome','msedge','firefox','brave','opera','opera_gx','vivaldi','librewolf')
 
 function Write-Log {
@@ -383,13 +382,14 @@ function Invoke-GpuEnforcement {
     )
     $usage = Get-GpuUsageByProcess -AdapterLuid $Adapter.Luid
     $actions = @()
+    $protectedNames = $script:DefaultProtected + $script:CustomGames
 
     foreach ($item in $usage) {
         $proc = Get-Process -Id $item.PID -ErrorAction SilentlyContinue
         if (-not $proc) { continue }
         $name = $proc.ProcessName.ToLowerInvariant()
 
-        if ($script:DefaultProtected -contains $name) { continue }
+        if ($protectedNames -contains $name) { continue }
 
         $action = [pscustomobject]@{
             PID = $item.PID
@@ -421,6 +421,7 @@ function Invoke-GpuEnforcement {
     foreach ($target in $script:AlwaysKillDuringGame) {
         $procs = Get-Process -Name $target -ErrorAction SilentlyContinue
         foreach ($p in $procs) {
+            if ($protectedNames -contains $p.ProcessName) { continue }
             $action = [pscustomobject]@{
                 PID = $p.Id
                 Name = $p.ProcessName

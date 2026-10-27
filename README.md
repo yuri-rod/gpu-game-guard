@@ -1,165 +1,128 @@
-# GPU Game Guard 🎮⚡
+# GPU Game Guard
 
-```
-   ██████╗ ██████╗ ██╗   ██╗     ██████╗  █████╗ ███╗   ███╗███████╗
-  ██╔════╝ ██╔══██╗██║   ██║    ██╔════╝ ██╔══██╗████╗ ████║██╔════╝
-  ██║  ███╗██████╔╝██║   ██║    ██║  ███╗███████║██╔████╔██║█████╗  
-  ██║   ██║██╔═══╝ ██║   ██║    ██║   ██║██╔══██║██║╚██╔╝██║██╔══╝  
-  ╚██████╔╝██║     ╚██████╔╝    ╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗
-   ╚═════╝ ╚═╝      ╚═════╝      ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝
-```
+A PowerShell watcher that stops unprotected GPU processes while a Steam session or a configured game process is running on Windows.
 
-**Dynamic GPU and VRAM guardian for PC gaming workstations.**  
-*Automatically frees dedicated GPU memory from background AI models, browsers, and worker processes when a game launches.*
+Use it on a PC shared between gaming and restartable background work, such as local model servers. It reads dedicated GPU memory counters and terminates selected processes to release their allocations. Save work and preview the selection before enabling enforcement.
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](GpuGameGuard.ps1)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-blue.svg)]()
-[![PowerShell: 5.1+](https://img.shields.io/badge/powershell-5.1%2B-blue.svg)]()
-[![GPU: NVIDIA | AMD | Intel](https://img.shields.io/badge/GPU-NVIDIA%20%7C%20AMD%20%7C%20Intel-green.svg)]()
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Donate-yellow.svg?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/yurirod)
+## Preview before enabling
 
----
-
-## Why GPU Game Guard?
-
-If you use your Windows PC for both local AI development (Ollama, ComfyUI, PyTorch, Whisper) and PC gaming, you have likely encountered sudden frame drops, micro-stutters, or Direct3D Out-of-Memory (OOM) crashes because a background process was silently holding 4GB to 8GB of VRAM.
-
-**GPU Game Guard** runs silently in the background as a lightweight, zero-overhead Windows daemon. It detects when a Steam, Epic Games, Xbox Game Pass, or custom PC game launches, instantly sweeps unneeded GPU allocations, and restores or releases enforcement when you stop playing.
-
----
-
-## Key Capabilities
-
-* **Hardware-Level DXGI & VRAM Inspection:** Queries exact per-process dedicated GPU memory using Windows DXGI adapters and performance counters.
-* **Smart Multi-Platform Game Detection:** Tracks active game sessions across Steam, Epic Games, Xbox Game Pass, EA, Ubisoft, and custom titles.
-* **Whitelisted Infrastructure:** Never interrupts GPU drivers, anti-cheats (Vanguard, EasyAntiCheat, BattlEye), fan curves (FanControl, MSI Afterburner), or active Jellyfin hardware transcodes.
-* **Graceful Browser Handling:** Sends `CloseMainWindow` to browsers first so your open tabs and sessions are preserved.
-* **Automatic Service Restoration:** Option to restart stopped AI servers when your game exits (`"auto_restore": true`).
-* **Zero Overhead:** Consumes less than 15MB of RAM while idling.
-
----
-
-## Quick Install
-
-Open an elevated PowerShell prompt (Run as Administrator) and run:
+Requires Windows 10 or 11 and Windows PowerShell 5.1 or later. GPU discovery uses DXGI; allocation reporting uses Windows GPU performance counters. No vendor CLI is required.
 
 ```powershell
-# Clone and register the background task in one step
 git clone https://github.com/yuri-rod/gpu-game-guard.git C:\GpuGameGuard
-powershell.exe -ExecutionPolicy Bypass -File C:\GpuGameGuard\GpuGameGuard.ps1 -Install
+Set-Location C:\GpuGameGuard
+powershell.exe -NoProfile -File .\GpuGameGuard.ps1 -Version
+# GpuGameGuard v1.1.0
+
+notepad .\config.json
 ```
 
----
+In [config.json](config.json), add each game's exact process name, without `.exe`, to `custom_games`. Names in this list both trigger enforcement and receive protection. Add other processes you need to keep, including game helpers, to `extra_protected_processes`. Use exact names, not wildcard patterns.
 
-## Command Reference
+For example, these entries protect a game called `mygame.exe` and every process named `ffmpeg.exe`:
+
+```json
+"custom_games": ["mygame"],
+"extra_protected_processes": ["discord", "spotify", "ffmpeg"]
+```
+
+Keep the other fields in the existing JSON object. Steam detection reads `RunningAppID` from the current user's registry; it does **not** identify or automatically protect the game's executables. Configure those names even for Steam games. Games from other launchers require `custom_games` entries.
+
+Then inspect the current machine:
 
 ```powershell
-# Check active gaming GPU, active game status, and live VRAM allocations
-powershell.exe -File GpuGameGuard.ps1 -Status
-
-# List all detected DXGI GPUs and dedicated VRAM capacities
-powershell.exe -File GpuGameGuard.ps1 -ListGpus
-
-# Run a simulation pass without closing any processes
-powershell.exe -File GpuGameGuard.ps1 -DryRun
-
-# Execute an immediate one-off GPU memory sweep
-powershell.exe -File GpuGameGuard.ps1 -PurgeNow
-
-# Print current version
-powershell.exe -File GpuGameGuard.ps1 -Version
-
-# Uninstall and stop the background scheduled task
-powershell.exe -File GpuGameGuard.ps1 -Uninstall
+powershell.exe -NoProfile -File .\GpuGameGuard.ps1 -ListGpus
+powershell.exe -NoProfile -File .\GpuGameGuard.ps1 -Status
+powershell.exe -NoProfile -File .\GpuGameGuard.ps1 -DryRun
 ```
 
----
+`-DryRun` lists `PID`, `Name`, `VRAM_MB` and `Action` for a single enforcement pass without closing processes. It runs even when no game is active. Check the selected GPU and review the output with your game and background applications running. An empty table can also mean the memory counters were unavailable, so it is not proof that the configuration is safe.
 
-## Protected vs. Enforced Processes
+After reviewing the selection and saving work, an elevated PowerShell prompt can run the watcher in the foreground:
 
-| Category | Policy | Examples |
-| :--- | :--- | :--- |
-| **System & Shell** | **Protected** | `dwm.exe`, `explorer.exe`, `csrss.exe`, `taskhostw.exe`, `wt.exe`, `powershell.exe` |
-| **GPU Drivers** | **Protected** | `nvdisplay.container.exe`, `nvcontainer.exe`, `amdrsserv.exe` |
-| **Hardware & Fans** | **Protected** | `FanControl.exe`, `MSIAfterburner.exe`, `RTSS.exe`, `HWiNFO64.exe` |
-| **Launchers & DRM** | **Protected** | `steam.exe`, `steamwebhelper.exe`, `EpicGamesLauncher.exe`, `EADesktop.exe` |
-| **Anti-Cheats** | **Protected** | `EasyAntiCheat.exe`, `BEService.exe`, `vgc.exe` (Vanguard), `faceit.exe` |
-| **Media Server** | **Protected** | `jellyfin.exe`, `caddy.exe` — but see the ffmpeg warning below |
-| **Background AI** | **Terminated** | `ollama.exe`, `ollama_llama_server.exe`, `comfyui` worker processes |
-| **Web Browsers** | **Graceful Close** | `chrome.exe`, `msedge.exe`, `firefox.exe`, `brave.exe`, `opera.exe`, `vivaldi.exe` |
-
----
-
-## Known limitation: ffmpeg and media transcodes
-
-**Read this if you run a media server.** Enforcement here works by exception: it
-walks every process using the GPU and terminates anything that is not on the
-protected list. Protection is matched on the **process name**.
-
-That has a consequence which is not obvious. Protecting `jellyfin` does **not**
-protect a Jellyfin transcode, because the process holding the VRAM is not
-`jellyfin.exe` — it is an `ffmpeg.exe` that Jellyfin spawned. Unless you protect
-it, a transcode in progress is terminated when a game starts.
-
-Adding `ffmpeg` to `extra_protected_processes` fixes that, and creates the
-opposite problem: your own batch encodes are named `ffmpeg.exe` too, and those
-are usually exactly the work you *want* to step aside for a game. Both binaries
-report the same process name; only their paths differ:
-
-```
-C:\Program Files\Jellyfin\Server\ffmpeg.exe          the family is watching
-C:\Users\you\AppData\...\WinGet\Links\ffmpeg.exe     a restartable batch job
+```powershell
+powershell.exe -NoProfile -File C:\GpuGameGuard\GpuGameGuard.ps1
 ```
 
-A name-based list cannot tell those apart. That is a limit of the design, not an
-oversight: this tool is deliberately a simple list, and a list has this hole.
+Stop the foreground watcher with Ctrl+C. This stops future enforcement; it does not relaunch previously stopped applications. The script writes diagnostics to `guard.log` beside itself.
 
-**What to do:**
+## Selection and termination rules
 
-- If you run a media server and value the stream above everything, add `ffmpeg`
-  to `extra_protected_processes`. You lose the ability to reclaim VRAM from your
-  own encodes; that is the trade.
-- If you need both — protect the stream, reclaim from the batch — a name list
-  cannot express it. [vramp](https://github.com/yuri-rod/vramp) exists for that
-  case: it matches on path, parent, command line and service session as well as
-  name, and it never touches a process it was not told about.
+Enforcement checks two sets of processes:
 
----
+1. Every process with a positive dedicated-memory allocation on the selected adapter.
+2. Built-in and configured `extra_kill_targets`, even when they have no reported GPU allocation.
 
-## Architecture
+The built-in protected names, `extra_protected_processes` and `custom_games` take precedence over both sets. The built-in list includes Windows components, launchers, anti-cheat processes, driver utilities, terminals, `jellyfin` and `caddy`. Inspect the actual lists in [GpuGameGuard.ps1](GpuGameGuard.ps1) for your applications.
 
+The GPU-allocation pass sends browsers `CloseMainWindow()`, followed by a 200 ms wait and forced termination if they are still running. Other candidates, including browsers selected by explicit kill targets, are forcibly terminated. Open tabs, unsaved forms and session recovery depend on the browser; the script does not save them.
+
+Protection matches process names. It does not follow parent processes, inspect executable paths or distinguish separate applications with the same name. For example, protecting `jellyfin` does not protect its `ffmpeg` transcode workers. Adding `ffmpeg` protects both media-server transcodes and unrelated batch encodes. [vramp](https://github.com/yuri-rod/vramp) is a separate project to inspect if you need more specific process policies.
+
+## Configuration and restoration
+
+| Field | Behavior |
+| --- | --- |
+| `idle_interval_seconds` | Poll interval without a detected game; default 3 seconds. |
+| `ingame_interval_seconds` | Enforcement interval while a game is detected; default 2 seconds. |
+| `gpu_pattern` | Adapter-description regular expression. The default matches `NVIDIA`, `Radeon` or `Arc`. |
+| `custom_games` | Exact process names that trigger enforcement and receive protection. |
+| `extra_protected_processes` | Additional process names excluded from both enforcement passes. |
+| `extra_kill_targets` | Additional process names selected even without reported GPU memory, unless protected. |
+| `auto_restore` | Relaunch captured executable paths after the watcher observes the game session ending; default `false`. |
+
+If several adapters match, the script selects the one with the most dedicated memory. If none match, it falls back to the adapter with the most dedicated memory. A pattern mismatch does not disable enforcement. Use `-ListGpus` and `-Status` to check the choice.
+
+Restoration stores unique executable paths in memory and calls `Start-Process` for those paths. It does not preserve arguments, working directories, service configuration, job progress or application state. It applies to captured candidates, including browsers, rather than only AI servers. Stopping the watcher loses that list. `-PurgeNow` does not run the watcher transition that restores applications.
+
+Configuration is loaded at startup. Restart the watcher after editing it. Invalid JSON is logged and the built-in defaults remain in effect, so validate edits and review `-DryRun` again before running enforcement. `-Config <path>` selects another file for a manual invocation; `-GpuPattern <regex>` overrides adapter selection for that invocation.
+
+## Background task and commands
+
+Only install after checking the foreground workflow. In an elevated PowerShell prompt:
+
+```powershell
+powershell.exe -NoProfile -File C:\GpuGameGuard\GpuGameGuard.ps1 -Install
 ```
-                          +-------------------------+
-                          |   Steam / Game Engine   |
-                          +------------+------------+
-                                       |
-                               (Game Started)
-                                       v
-+------------------+      +-------------------------+      +-------------------+
-|  Local AI & LLMs | <--- |   GPU Game Guard Daemon | ---> | Web Browsers      |
-|  (Ollama, Comfy) |      |   (DXGI / Performance)  |      | (Chrome, Edge...) |
-|  [TERMINATED]    |      +-------------------------+      | [GRACEFUL CLOSE]  |
-+------------------+                   |                   +-------------------+
-                                       |
-                             (Game Exited / Idle)
-                                       v
-                          +-------------------------+
-                          |  Enforcement Released   |
-                          |  GPU Returned to Dev    |
-                          +-------------------------+
+
+This registers and immediately starts the `GpuGameGuard` scheduled task, with startup and logon triggers and highest privileges for the installing user. Keep the script directory writable only by people you trust. The task loads `config.json` beside the script; installation does not persist `-Config` or `-GpuPattern` overrides. Windows session behavior and GPU access need checking on the target machine.
+
+| Command | Effect |
+| --- | --- |
+| `-Version` | Prints the script version without starting the watcher. |
+| `-ListGpus` | Lists DXGI adapters and dedicated memory capacity. |
+| `-Status` | Prints the selected adapter, detected game state and reported allocations. |
+| `-DryRun` | Previews an immediate pass without terminating processes. |
+| `-PurgeNow` | Immediately terminates selected processes, whether or not a game is running. Save work and preview first. |
+| `-Uninstall` | Stops and removes the scheduled task. Requires elevation; leaves files and logs in place. |
+
+`-Pause` and `-Resume` are declared parameters without implemented handlers. Do not use them to control an existing watcher. Use Ctrl+C for a foreground run or `-Uninstall` for the scheduled task.
+
+## Implementation and tests
+
+[GpuGameGuard.ps1](GpuGameGuard.ps1) contains the DXGI interop, counter aggregation, Steam/custom detection, enforcement and restoration logic. Dot-sourcing imports those definitions without starting the watcher. This synthetic adapter example needs no GPU access:
+
+```powershell
+. .\GpuGameGuard.ps1
+$adapters = @(
+    [pscustomobject]@{ Description = 'Sample integrated'; DedicatedVideoMemory = 512MB; Luid = 'integrated' }
+    [pscustomobject]@{ Description = 'Sample discrete'; DedicatedVideoMemory = 8GB; Luid = 'discrete' }
+)
+(Resolve-GamingAdapter -Adapters $adapters -Pattern 'Sample').Description
+# Sample discrete
 ```
 
----
+Run the [Pester tests](tests/GpuGameGuard.Tests.ps1) in PowerShell:
 
-## Support & Sponsorship
+```powershell
+Install-Module Pester -MinimumVersion 6.0.0 -MaximumVersion 6.999.999 -Scope CurrentUser
+Invoke-Pester -Path .\tests\GpuGameGuard.Tests.ps1 -Output Detailed -CI
+```
 
-If GPU Game Guard helped keep your gaming sessions smooth and stutter-free, consider buying me a coffee:
+The tests cover version reporting, adapter selection, protection precedence, custom-game protection and simulated enforcement with mocked process operations. They do not validate live DXGI counters, browser recovery, scheduled-task sessions or actual GPU memory release. [CI](.github/workflows/ci.yml) runs Pester, parsing checks and PSScriptAnalyzer on Windows; analyzer errors fail the job and warnings are reported.
 
-<a href="https://buymeacoffee.com/yurirod"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=yurirod&button_colour=FFDD00&font_colour=000000&font_family=Inter&outline_colour=000000&coffee_colour=ffffff" /></a>
+For changes, include a focused regression test and distinguish mocked checks from Windows hardware validation in the pull request.
 
----
+## License and support
 
-## License
-
-MIT License (c) 2026 Yuri Barreira
+[MIT License](LICENSE), copyright (c) 2026 Yuri Barreira. [Support the project](https://buymeacoffee.com/yurirod).
