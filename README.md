@@ -75,7 +75,9 @@ If several adapters match, the script selects the one with the most dedicated me
 
 Restoration stores unique executable paths in memory and calls `Start-Process` for those paths. It does not preserve arguments, working directories, service configuration, job progress or application state. It applies to captured candidates, including browsers, rather than only AI servers. Stopping the watcher loses that list. `-PurgeNow` does not run the watcher transition that restores applications.
 
-Configuration is loaded at startup. Restart the watcher after editing it. Invalid JSON is logged and the built-in defaults remain in effect, so validate edits and review `-DryRun` again before running enforcement. `-Config <path>` selects another file for a manual invocation; `-GpuPattern <regex>` overrides adapter selection for that invocation.
+Configuration is loaded at startup. Restart the watcher after editing it. The full file is validated before settings are applied: intervals must be positive whole numbers, `auto_restore` must be a JSON boolean, process lists must be arrays of nonempty strings and `gpu_pattern` must be a valid regular expression. Unknown fields are rejected so a misspelled protection setting cannot be silently ignored.
+
+An unreadable or invalid file stops startup before process inspection or enforcement. A missing optional `config.json` uses built-in defaults; an explicitly selected `-Config <path>` must exist. Review `-DryRun` after changing settings. `-Config` selects a file for a manual invocation, and `-GpuPattern <regex>` overrides adapter selection for that invocation.
 
 ## Background task and commands
 

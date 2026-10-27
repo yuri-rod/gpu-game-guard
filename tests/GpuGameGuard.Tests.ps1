@@ -125,3 +125,84 @@ Describe 'Resolve-GamingAdapter' {
         Resolve-GamingAdapter -Adapters @() | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Import-ConfigFile validation' {
+    BeforeEach {
+        $script:ConfigPath = Join-Path $TestDrive 'config.json'
+        $script:ConfigWasSpecified = $true
+        $script:IdleInterval = 3
+        $script:InGameInterval = 2
+        $script:DefaultGpuPattern = 'NVIDIA|Radeon|Arc'
+        $script:AutoRestore = $false
+        $script:DefaultProtected = @('protected-worker')
+        $script:AlwaysKillDuringGame = @('worker')
+        $script:CustomGames = @('existing-game')
+        Mock Write-Log {}
+    }
+
+    It 'rejects a missing explicitly selected file' {
+        $script:ConfigPath = Join-Path $TestDrive 'missing.json'
+        { Import-ConfigFile } | Should -Throw
+    }
+
+    It 'keeps defaults when the optional default file is absent' {
+        $script:ConfigPath = Join-Path $TestDrive 'missing-default.json'
+        $script:ConfigWasSpecified = $false
+        { Import-ConfigFile } | Should -Not -Throw
+        $script:DefaultProtected | Should -Be @('protected-worker')
+        $script:IdleInterval | Should -Be 3
+    }
+
+    It 'rejects <Label> before changing any settings' -ForEach @(
+        @{ Label = 'malformed JSON'; Json = '{' }
+        @{ Label = 'an array root'; Json = '[{"idle_interval_seconds":7}]' }
+        @{ Label = 'a noninteger interval'; Json = '{"idle_interval_seconds":7,"ingame_interval_seconds":"bad"}' }
+        @{ Label = 'a zero interval'; Json = '{"idle_interval_seconds":7,"ingame_interval_seconds":0}' }
+        @{ Label = 'an invalid pattern'; Json = '{"idle_interval_seconds":7,"gpu_pattern":"["}' }
+        @{ Label = 'a string boolean'; Json = '{"idle_interval_seconds":7,"auto_restore":"false"}' }
+        @{ Label = 'a string protection list'; Json = '{"idle_interval_seconds":7,"extra_protected_processes":"mygame"}' }
+        @{ Label = 'a nonstring game name'; Json = '{"idle_interval_seconds":7,"custom_games":["mygame",42]}' }
+        @{ Label = 'a null target name'; Json = '{"idle_interval_seconds":7,"extra_kill_targets":[null]}' }
+        @{ Label = 'a misspelled protection field'; Json = '{"idle_interval_seconds":7,"extra_protected_process":["mygame"]}' }
+    ) {
+        param($Label, $Json)
+        Set-Content -LiteralPath $script:ConfigPath -Value $Json
+        $failure = $null
+        try { Import-ConfigFile } catch { $failure = $_ }
+        $script:IdleInterval | Should -Be 3
+        $script:InGameInterval | Should -Be 2
+        $script:DefaultGpuPattern | Should -Be 'NVIDIA|Radeon|Arc'
+        $script:AutoRestore | Should -BeFalse
+        $script:DefaultProtected | Should -Be @('protected-worker')
+        $script:AlwaysKillDuringGame | Should -Be @('worker')
+        $script:CustomGames | Should -Be @('existing-game')
+        $failure | Should -Not -BeNullOrEmpty
+    }
+
+    It 'loads valid optional settings and retains existing protected names' {
+        Set-Content -LiteralPath $script:ConfigPath -Value @'
+{"idle_interval_seconds":5,"ingame_interval_seconds":1,"gpu_pattern":"Radeon","auto_restore":true,"extra_protected_processes":[" New-Worker ","protected-worker"],"extra_kill_targets":[" New-Target "],"custom_games":[" New-Game "]}
+'@
+        Import-ConfigFile
+        $script:IdleInterval | Should -Be 5
+        $script:InGameInterval | Should -Be 1
+        $script:DefaultGpuPattern | Should -Be 'Radeon'
+        $script:AutoRestore | Should -BeTrue
+        $script:DefaultProtected | Should -Be @('protected-worker', 'new-worker')
+        $script:AlwaysKillDuringGame | Should -Be @('worker', 'new-target')
+        $script:CustomGames | Should -Be @('existing-game', 'new-game')
+    }
+
+    It 'stops watcher startup before querying processes or enforcing an invalid file' {
+        Set-Content -LiteralPath $script:ConfigPath -Value '{'
+        Mock Test-Admin { $false }
+        Mock Get-ActiveGameSession { [pscustomobject]@{ IsRunning = $true; Source = 'Fixture'; Identifier = 'mygame' } }
+        Mock Get-DxgiAdapters { @($script:rtx) }
+        Mock Invoke-GpuEnforcement {}
+        Mock Start-Sleep { throw 'Fixture stopped the watcher loop' }
+        { Start-WatcherLoop } | Should -Throw
+        Should -Invoke Get-ActiveGameSession -Times 0 -Exactly
+        Should -Invoke Get-DxgiAdapters -Times 0 -Exactly
+        Should -Invoke Invoke-GpuEnforcement -Times 0 -Exactly
+    }
+}

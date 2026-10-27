@@ -60,7 +60,8 @@ $ErrorActionPreference = 'Continue'
 $script:BaseDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogPath = Join-Path $script:BaseDir 'guard.log'
 $script:TaskName = 'GpuGameGuard'
-$script:ConfigPath = if ($Config) { $Config } else { Join-Path $script:BaseDir 'config.json' }
+$script:ConfigWasSpecified = $PSBoundParameters.ContainsKey('Config')
+$script:ConfigPath = if ($script:ConfigWasSpecified) { $Config } else { Join-Path $script:BaseDir 'config.json' }
 
 # Default configurations
 $script:IdleInterval = 3
@@ -121,10 +122,44 @@ function Write-Log {
 }
 
 function Import-ConfigFile {
-    if (Test-Path -Path $script:ConfigPath) {
+    if ([string]::IsNullOrWhiteSpace($script:ConfigPath)) {
+        throw 'Configuration path must not be empty.'
+    }
+    if (Test-Path -LiteralPath $script:ConfigPath -ErrorAction Stop) {
         try {
-            $raw = Get-Content -Path $script:ConfigPath -Raw -Encoding UTF8 -ErrorAction Stop
+            $raw = Get-Content -LiteralPath $script:ConfigPath -Raw -Encoding UTF8 -ErrorAction Stop
             $cfg = $raw | ConvertFrom-Json -ErrorAction Stop
+            if ($cfg -isnot [pscustomobject] -or -not $raw.TrimStart().StartsWith('{')) {
+                throw 'Configuration must be a JSON object.'
+            }
+            # Validate every field before changing protection or enforcement settings.
+            foreach ($property in $cfg.PSObject.Properties) {
+                $value = $property.Value
+                switch ($property.Name) {
+                    { $_ -in @('idle_interval_seconds', 'ingame_interval_seconds') } {
+                        if (($value -isnot [int] -and $value -isnot [long] -and $value -isnot [double]) -or
+                            -not ($value -ge 1 -and $value -le [int]::MaxValue -and $value -eq [math]::Truncate($value))) {
+                            throw "$($property.Name) must be a positive integer no greater than $([int]::MaxValue)."
+                        }
+                    }
+                    'gpu_pattern' {
+                        if ($value -isnot [string]) { throw 'gpu_pattern must be a string.' }
+                        $null = [regex]::new($value)
+                    }
+                    'auto_restore' {
+                        if ($value -isnot [bool]) { throw 'auto_restore must be a JSON boolean.' }
+                    }
+                    { $_ -in @('extra_protected_processes', 'extra_kill_targets', 'custom_games') } {
+                        if ($value -isnot [array]) { throw "$($property.Name) must be an array of process names." }
+                        foreach ($name in $value) {
+                            if ($name -isnot [string] -or [string]::IsNullOrWhiteSpace($name)) {
+                                throw "$($property.Name) must contain only nonempty strings."
+                            }
+                        }
+                    }
+                    default { throw "Unknown configuration field: $($property.Name)." }
+                }
+            }
             if ($cfg.idle_interval_seconds) { $script:IdleInterval = [int]$cfg.idle_interval_seconds }
             if ($cfg.ingame_interval_seconds) { $script:InGameInterval = [int]$cfg.ingame_interval_seconds }
             if ($cfg.gpu_pattern) { $script:DefaultGpuPattern = [string]$cfg.gpu_pattern }
@@ -155,8 +190,11 @@ function Import-ConfigFile {
             }
             Write-Log "Loaded configuration from $($script:ConfigPath)"
         } catch {
-            Write-Log "WARN: Failed to parse configuration: $($_.Exception.Message)"
+            Write-Log "ERROR: Invalid configuration: $($_.Exception.Message)"
+            throw "Cannot load configuration '$($script:ConfigPath)': $($_.Exception.Message)"
         }
+    } elseif ($script:ConfigWasSpecified) {
+        throw "Configuration file not found: $($script:ConfigPath)"
     }
 }
 
