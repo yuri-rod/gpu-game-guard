@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    GpuGameGuard v1.1.0 - Stops unprotected GPU processes during gaming on Windows.
+    GpuGameGuard v1.1.1 - Stops unprotected GPU processes during gaming on Windows.
 
 .DESCRIPTION
     Detects Steam sessions and configured game process names, then stops
@@ -55,7 +55,7 @@ param(
     [string]$GpuPattern = ''
 )
 
-$script:AppVersion = '1.1.0'
+$script:AppVersion = '1.1.1'
 $ErrorActionPreference = 'Continue'
 $script:BaseDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:LogPath = Join-Path $script:BaseDir 'guard.log'

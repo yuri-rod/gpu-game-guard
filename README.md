@@ -12,7 +12,7 @@ Requires Windows 10 or 11 and Windows PowerShell 5.1 or later. GPU discovery use
 git clone https://github.com/yuri-rod/gpu-game-guard.git C:\GpuGameGuard
 Set-Location C:\GpuGameGuard
 powershell.exe -NoProfile -File .\GpuGameGuard.ps1 -Version
-# GpuGameGuard v1.1.0
+# GpuGameGuard v1.1.1
 
 notepad .\config.json
 ```
