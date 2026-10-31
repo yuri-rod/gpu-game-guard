@@ -32,10 +32,10 @@
     Optional custom path to config.json.
 
 .PARAMETER Pause
-    Reserved parameter without a handler. Does not pause an existing watcher.
+    Pauses (disables) the background scheduled task watcher (requires elevation).
 
 .PARAMETER Resume
-    Reserved parameter without a handler. Does not resume an existing watcher.
+    Resumes (enables) and starts the background scheduled task watcher (requires elevation).
 
 .PARAMETER GpuPattern
     Custom regex pattern to match the discrete gaming GPU adapter description.
@@ -524,6 +524,26 @@ function Uninstall-GpuGameGuard {
     Write-Output "GpuGameGuard stopped and uninstalled."
 }
 
+function Pause-GpuGameGuard {
+    if (-not (Test-Admin)) {
+        Write-Error "Please run with Administrator privileges to pause the scheduled task."
+        return
+    }
+    Disable-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
+    Write-Output "GpuGameGuard scheduled task paused."
+}
+
+function Resume-GpuGameGuard {
+    if (-not (Test-Admin)) {
+        Write-Error "Please run with Administrator privileges to resume the scheduled task."
+        return
+    }
+    Enable-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
+    Write-Output "GpuGameGuard scheduled task resumed."
+}
+
 function Show-Status {
     Import-ConfigFile
     $adapters = Get-DxgiAdapters
@@ -618,6 +638,8 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 if ($Version) { Write-Output "GpuGameGuard v$($script:AppVersion)"; exit 0 }
 if ($Install) { Install-GpuGameGuard; exit 0 }
 if ($Uninstall) { Uninstall-GpuGameGuard; exit 0 }
+if ($Pause) { Pause-GpuGameGuard; exit 0 }
+if ($Resume) { Resume-GpuGameGuard; exit 0 }
 if ($ListGpus) { Show-GpuList; exit 0 }
 if ($Status) { Show-Status; exit 0 }
 if ($DryRun) {

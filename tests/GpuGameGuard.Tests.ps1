@@ -45,6 +45,14 @@ Describe 'GpuGameGuard Version & Config' {
 
     It 'defines its functions when dot-sourced instead of running' {
         Get-Command Resolve-GamingAdapter -CommandType Function | Should -Not -BeNullOrEmpty
+        Get-Command Pause-GpuGameGuard -CommandType Function | Should -Not -BeNullOrEmpty
+        Get-Command Resume-GpuGameGuard -CommandType Function | Should -Not -BeNullOrEmpty
+    }
+
+    It 'requires elevation to pause or resume scheduled task' {
+        Mock Test-Admin { $false }
+        { Pause-GpuGameGuard } | Should -Throw
+        { Resume-GpuGameGuard } | Should -Throw
     }
 }
 
