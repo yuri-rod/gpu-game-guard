@@ -526,8 +526,7 @@ function Uninstall-GpuGameGuard {
 
 function Pause-GpuGameGuard {
     if (-not (Test-Admin)) {
-        Write-Error "Please run with Administrator privileges to pause the scheduled task."
-        return
+        throw "Please run with Administrator privileges to pause the scheduled task."
     }
     Disable-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
     Stop-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
@@ -536,8 +535,7 @@ function Pause-GpuGameGuard {
 
 function Resume-GpuGameGuard {
     if (-not (Test-Admin)) {
-        Write-Error "Please run with Administrator privileges to resume the scheduled task."
-        return
+        throw "Please run with Administrator privileges to resume the scheduled task."
     }
     Enable-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
     Start-ScheduledTask -TaskName $script:TaskName -ErrorAction SilentlyContinue
