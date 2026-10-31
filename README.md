@@ -96,9 +96,11 @@ This registers and immediately starts the `GpuGameGuard` scheduled task, with st
 | `-Status` | Prints the selected adapter, detected game state and reported allocations. |
 | `-DryRun` | Previews an immediate pass without terminating processes. |
 | `-PurgeNow` | Immediately terminates selected processes, whether or not a game is running. Save work and preview first. |
+| `-Pause` | Pauses (disables) the scheduled background task without uninstalling it. Requires elevation. |
+| `-Resume` | Resumes (enables) and starts the scheduled background task. Requires elevation. |
 | `-Uninstall` | Stops and removes the scheduled task. Requires elevation; leaves files and logs in place. |
 
-`-Pause` and `-Resume` are declared parameters without implemented handlers. Do not use them to control an existing watcher. Use Ctrl+C for a foreground run or `-Uninstall` for the scheduled task.
+Use `-Pause` and `-Resume` to temporarily halt enforcement during heavy AI batch rendering or maintenance without losing your task configuration. Use Ctrl+C for a foreground watcher.
 
 ## Implementation and tests
 
@@ -124,6 +126,14 @@ Invoke-Pester -Path .\tests\GpuGameGuard.Tests.ps1 -Output Detailed -CI
 The tests cover version reporting, adapter selection, protection precedence, custom-game protection and simulated enforcement with mocked process operations. They do not validate live DXGI counters, browser recovery, scheduled-task sessions or actual GPU memory release. [CI](.github/workflows/ci.yml) runs Pester, parsing checks and PSScriptAnalyzer on Windows; analyzer errors fail the job and warnings are reported.
 
 For changes, include a focused regression test and distinguish mocked checks from Windows hardware validation in the pull request.
+
+## Technical roadmap
+
+Realistic planned engineering milestones:
+
+1. Hybrid multi-GPU and dual-adapter topology support (10 hours): Support asymmetric multi-GPU desktop systems where lightweight media or desktop applications can be dynamically moved to an integrated GPU while dedicated discrete memory is completely preserved for the game.
+2. Launcher detection hooks for Epic Games, Xbox App, and Battle.net (8 hours): Expand automated session discovery beyond the Steam user registry by monitoring common gaming launcher process groups and overlay hooks.
+3. System tray indicator companion (8 hours): Provide a lightweight Windows notification area icon showing real-time gaming VRAM allocations, active game state, and one-click enforcement pause.
 
 ## License and support
 
